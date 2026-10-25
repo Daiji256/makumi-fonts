@@ -18,11 +18,11 @@ This script:
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
-from pathlib import Path
 import re
 import sys
 import urllib.request
+from datetime import datetime
+from pathlib import Path
 
 from east_asian_spacing import Builder, Config
 from fontTools.misc import timeTools
@@ -53,7 +53,7 @@ AUTHOR_COPYRIGHT = "Copyright 2026 Daiji256."
 # Update this timestamp (ISO 8601 UTC) when releasing a new version.
 BUILD_DATE = "2026-10-25T10:00:00Z"
 BUILD_TIMESTAMP = timeTools.timestampSinceEpoch(
-    datetime.fromisoformat(BUILD_DATE.replace("Z", "+00:00")).timestamp()
+    datetime.fromisoformat(BUILD_DATE).timestamp()
 )
 
 
@@ -182,11 +182,11 @@ def update_metadata(font: TTFont) -> None:
                 record.string = new_val.replace("Zen", "Makumi")
             elif nid == 5:  # Version
                 record.string = FONT_VERSION_STRING
-            elif nid in (1, 4, 6, 16):  # Family, Full Name, PostScript Name, Typographic Family
+            elif nid in (1, 4, 6, 16):
                 record.string = val.replace("Zen", "Makumi")
             elif nid in (2, 17):  # Subfamily, Typographic Subfamily
                 pass  # Keep as is (Regular, Bold, etc.)
-        except Exception:
+        except (UnicodeDecodeError, KeyError):
             pass
 
     # Ensure Description (NameID 10) is set for Windows and Mac platforms
@@ -338,7 +338,9 @@ async def process_font(src_path: Path) -> None:
     else:
         print(f"[{src_path.name}] Using cached chws font.")
 
-    print(f"[{src_path.name}] Subsetting & exporting to {kebab_name}.{{ttf,woff,woff2}}...")
+    print(
+        f"[{src_path.name}] Subsetting & exporting to {kebab_name}.{{ttf,woff,woff2}}..."
+    )
     subset_and_export(chws_cache, output_base)
 
 
