@@ -18,11 +18,13 @@ This script:
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 import re
 import sys
 
 from east_asian_spacing import Builder, Config
+from fontTools.misc import timeTools
 from fontTools.subset import Options, Subsetter
 from fontTools.ttLib import TTFont
 
@@ -37,6 +39,13 @@ FONT_VERSION_STRING = "Version 1.000"
 FONT_REVISION = 1.0
 VENDOR_ID = b"MKMI"
 AUTHOR_COPYRIGHT = "Copyright 2026 Daiji256."
+
+# Fixed build timestamp for deterministic (reproducible) builds.
+# Update this timestamp (ISO 8601 UTC) when releasing a new version.
+BUILD_DATE = "2026-10-25T10:00:00Z"
+BUILD_TIMESTAMP = timeTools.timestampSinceEpoch(
+    datetime.fromisoformat(BUILD_DATE.replace("Z", "+00:00")).timestamp()
+)
 
 
 def to_kebab_case(filename: str) -> str:
@@ -53,9 +62,11 @@ def to_kebab_case(filename: str) -> str:
 
 def update_metadata(font: TTFont) -> None:
     """Update font metadata (name, head, OS/2 tables) for Makumi release."""
-    # 1. head table: fontRevision
+    # 1. head table: fontRevision and fixed modified timestamp
     if "head" in font:
         font["head"].fontRevision = FONT_REVISION
+        font["head"].modified = BUILD_TIMESTAMP
+    font.recalcTimestamp = False
 
     # 2. OS/2 table: achVendID
     if "OS/2" in font:
@@ -122,7 +133,8 @@ async def add_chws_features(src_path: Path, dest_path: Path) -> None:
 
 def subset_and_export(chws_ttf_path: Path, output_base_path: Path) -> None:
     """Subset the font to YAKUMONO_CHARS and export TTF, WOFF, and WOFF2."""
-    font = TTFont(chws_ttf_path)
+    font = TTFont(chws_ttf_path, recalcTimestamp=False)
+    font.recalcTimestamp = False
 
     options = Options()
     options.layout_features = ["*"]
