@@ -61,3 +61,8 @@ echo "=== All source fonts downloaded successfully ==="
 
 echo "=== Building Makumi Web Fonts ==="
 uv run build.py
+
+if [ "${1:-}" = "test" ]; then
+  echo "=== Running Makumi Font Tests ==="
+  uv run test.py
+fi
