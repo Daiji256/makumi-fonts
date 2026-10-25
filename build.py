@@ -36,7 +36,7 @@ CHWS_CACHE_DIR = Path("tmp/chws")
 FONT_VERSION_STRING = "Version 1.000"
 FONT_REVISION = 1.0
 VENDOR_ID = b"MKMI"
-AUTHOR_COPYRIGHT = "Copyright 2026 Daiji Suzuki."
+AUTHOR_COPYRIGHT = "Copyright 2026 Daiji256."
 
 
 def to_kebab_case(filename: str) -> str:
