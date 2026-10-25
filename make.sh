@@ -58,3 +58,6 @@ done
 download_font "googlefonts/zen-kurenaido" "${ZEN_KURENAIDO_REV}" "ZenKurenaido-Regular.ttf"
 
 echo "=== All source fonts downloaded successfully ==="
+
+echo "=== Building Makumi Web Fonts ==="
+uv run build.py
