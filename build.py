@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import re
 import sys
+import urllib.request
 
 from east_asian_spacing import Builder, Config
 from fontTools.misc import timeTools
@@ -54,6 +55,73 @@ BUILD_DATE = "2026-10-25T10:00:00Z"
 BUILD_TIMESTAMP = timeTools.timestampSinceEpoch(
     datetime.fromisoformat(BUILD_DATE.replace("Z", "+00:00")).timestamp()
 )
+
+
+# Source Zen font repositories and pinned commit revisions (alphabetical order)
+SOURCE_REPOS: list[tuple[str, str, list[str]]] = [
+    # 1. Zen Antique & Zen Antique Soft (2 fonts)
+    (
+        "googlefonts/zen-antique",
+        "3521a97dfa21d4c985725be88e9beb5edef517b9",
+        ["ZenAntique-Regular.ttf", "ZenAntiqueSoft-Regular.ttf"],
+    ),
+    # 2. Zen Kaku Gothic Antique (5 fonts) & Zen Kaku Gothic New (5 fonts)
+    (
+        "googlefonts/zen-kakugothic",
+        "2705757e17e42954f3acbdf921ac0ae24d1270cd",
+        [
+            f"ZenKakuGothicAntique-{w}.ttf"
+            for w in ["Light", "Regular", "Medium", "Bold", "Black"]
+        ]
+        + [
+            f"ZenKakuGothicNew-{w}.ttf"
+            for w in ["Light", "Regular", "Medium", "Bold", "Black"]
+        ],
+    ),
+    # 3. Zen Kurenaido (1 font)
+    (
+        "googlefonts/zen-kurenaido",
+        "cd751ced55d4ebb1fb2fbd90602eb9351dd03fd6",
+        ["ZenKurenaido-Regular.ttf"],
+    ),
+    # 4. Zen Maru Gothic (5 fonts)
+    (
+        "googlefonts/zen-marugothic",
+        "553c872b216d1290e2902a466edcdc9682f0df6a",
+        [
+            f"ZenMaruGothic-{w}.ttf"
+            for w in ["Light", "Regular", "Medium", "Bold", "Black"]
+        ],
+    ),
+    # 5. Zen Old Mincho (5 fonts)
+    (
+        "googlefonts/zen-oldmincho",
+        "490d363e7886839ba1f86971cf874a1d70ad27f0",
+        [
+            f"ZenOldMincho-{w}.ttf"
+            for w in ["Regular", "Medium", "SemiBold", "Bold", "Black"]
+        ],
+    ),
+]
+
+
+def download_source_fonts() -> None:
+    """Download source Zen fonts from GitHub repositories if not already present."""
+    SOURCES_DIR.mkdir(parents=True, exist_ok=True)
+    print("=== Checking source Zen fonts (alphabetical order) ===")
+    for repo, rev, filenames in SOURCE_REPOS:
+        for filename in filenames:
+            dest = SOURCES_DIR / filename
+            if dest.exists():
+                continue
+            url = f"https://raw.githubusercontent.com/{repo}/{rev}/fonts/ttf/{filename}"
+            print(f"Downloading {filename} from {repo} ({rev[:7]})...")
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "makumi-fonts-build/1.0"},
+            )
+            with urllib.request.urlopen(req) as resp, open(dest, "wb") as f:
+                f.write(resp.read())
 
 
 def to_kebab_case(filename: str) -> str:
@@ -275,9 +343,7 @@ async def process_font(src_path: Path) -> None:
 
 
 async def main() -> None:
-    if not SOURCES_DIR.exists():
-        print(f"Error: {SOURCES_DIR} does not exist. Run source download first.")
-        sys.exit(1)
+    download_source_fonts()
 
     source_fonts = sorted(SOURCES_DIR.glob("*.ttf"))
     if not source_fonts:
