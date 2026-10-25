@@ -32,8 +32,16 @@ from fontTools.ttLib import TTFont
 YAKUMONO_CHARS = "、。，．・：；（）「」『』［］｛｝【】〈〉《》〔〕〝〟　"
 
 SOURCES_DIR = Path("tmp/sources")
+NORMALIZED_CACHE_DIR = Path("tmp/normalized")
 OUTPUT_DIR = Path("fonts")
 CHWS_CACHE_DIR = Path("tmp/chws")
+
+# Opening brackets that sit on the right half of fullwidth: shift right
+OPENING_CHARS = "「『【〈《〔〝"
+# Closing brackets and punctuation that sit on the left half of fullwidth: advance=1000
+CLOSING_CHARS = "」』】〉》〕〟、。"
+# Middle punctuation: centered
+MIDDLE_CHARS = "・"
 
 FONT_VERSION_STRING = "Version 1.000"
 FONT_REVISION = 1.0
@@ -118,6 +126,87 @@ def update_metadata(font: TTFont) -> None:
     name_table.setName(description, 10, 1, 0, 0)
 
 
+def normalize_font_metrics(src_path: Path) -> Path:
+    """Normalize non-1000 advance widths of fullwidth punctuation (e.g. Zen Kurenaido).
+
+    Zen Kurenaido sets punctuation advance to 943 to match kana metrics, which causes
+    east-asian-spacing (chws) to skip them. This function adjusts 943-advance punctuation
+    to fullwidth 1000 (shifting opening brackets right, centering middle dot) so chws
+    features apply correctly.
+    """
+    font = TTFont(src_path, recalcTimestamp=False)
+    font.recalcTimestamp = False
+    hmtx = font.get("hmtx")
+    glyf = font.get("glyf")
+    cmap = font.getBestCmap()
+
+    if not hmtx or not glyf or not cmap:
+        return src_path
+
+    # Check if any yakumono character has non-1000 advance
+    needs_normalization = False
+    for char in YAKUMONO_CHARS:
+        code = ord(char)
+        if code in cmap:
+            gid = cmap[code]
+            adv, _ = hmtx[gid]
+            if adv != 1000:
+                needs_normalization = True
+                break
+
+    if not needs_normalization:
+        return src_path
+
+    dest_path = NORMALIZED_CACHE_DIR / src_path.name
+    if dest_path.exists():
+        return dest_path
+
+    NORMALIZED_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"[{src_path.name}] Normalizing punctuation advances to 1000...")
+
+    for char in OPENING_CHARS:
+        code = ord(char)
+        if code in cmap:
+            gid = cmap[code]
+            adv, lsb = hmtx[gid]
+            if adv != 1000:
+                diff = 1000 - adv
+                hmtx[gid] = (1000, lsb + diff)
+                g = glyf[gid]
+                g.xMin += diff
+                g.xMax += diff
+                coords = g.coordinates
+                for i in range(len(coords)):
+                    coords[i] = (coords[i][0] + diff, coords[i][1])
+
+    for char in CLOSING_CHARS:
+        code = ord(char)
+        if code in cmap:
+            gid = cmap[code]
+            adv, lsb = hmtx[gid]
+            if adv != 1000:
+                hmtx[gid] = (1000, lsb)
+
+    for char in MIDDLE_CHARS:
+        code = ord(char)
+        if code in cmap:
+            gid = cmap[code]
+            adv, lsb = hmtx[gid]
+            if adv != 1000:
+                half_diff = (1000 - adv) // 2
+                hmtx[gid] = (1000, lsb + half_diff)
+                g = glyf[gid]
+                g.xMin += half_diff
+                g.xMax += half_diff
+                coords = g.coordinates
+                for i in range(len(coords)):
+                    coords[i] = (coords[i][0] + half_diff, coords[i][1])
+
+    font["head"].modified = BUILD_TIMESTAMP
+    font.save(dest_path)
+    return dest_path
+
+
 async def add_chws_features(src_path: Path, dest_path: Path) -> None:
     """Inject chws, vchw, halt, vhal features into font."""
     config = Config.default.clone()
@@ -170,13 +259,14 @@ def subset_and_export(chws_ttf_path: Path, output_base_path: Path) -> None:
 
 async def process_font(src_path: Path) -> None:
     """Process a single font file."""
+    normalized_src = normalize_font_metrics(src_path)
     kebab_name = to_kebab_case(src_path.name)
     chws_cache = CHWS_CACHE_DIR / src_path.name
     output_base = OUTPUT_DIR / kebab_name
 
     if not chws_cache.exists():
         print(f"[{src_path.name}] Adding chws features...")
-        await add_chws_features(src_path, chws_cache)
+        await add_chws_features(normalized_src, chws_cache)
     else:
         print(f"[{src_path.name}] Using cached chws font.")
 
