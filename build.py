@@ -33,6 +33,11 @@ SOURCES_DIR = Path("tmp/sources")
 OUTPUT_DIR = Path("fonts")
 CHWS_CACHE_DIR = Path("tmp/chws")
 
+FONT_VERSION_STRING = "Version 1.000"
+FONT_REVISION = 1.0
+VENDOR_ID = b"MKMI"
+AUTHOR_COPYRIGHT = "Copyright 2026 Daiji Suzuki."
+
 
 def to_kebab_case(filename: str) -> str:
     """Convert PascalCase font filename to kebab-case.
@@ -46,25 +51,60 @@ def to_kebab_case(filename: str) -> str:
     return re.sub(r"-+", "-", s)
 
 
-def rename_zen_to_makumi(text: str) -> str:
-    """Replace Zen branding with Makumi in name records."""
-    text = text.replace("ZEN!", "MAKUMI").replace("ZEN", "MAKUMI")
-    text = text.replace("Zen", "Makumi")
-    return text
+def update_metadata(font: TTFont) -> None:
+    """Update font metadata (name, head, OS/2 tables) for Makumi release."""
+    # 1. head table: fontRevision
+    if "head" in font:
+        font["head"].fontRevision = FONT_REVISION
 
+    # 2. OS/2 table: achVendID
+    if "OS/2" in font:
+        font["OS/2"].achVendID = VENDOR_ID
 
-def update_name_table(font: TTFont) -> None:
-    """Update name table records to reflect the Makumi brand."""
+    # 3. name table
     if "name" not in font:
         return
-    for record in font["name"].names:
+
+    name_table = font["name"]
+
+    # Extract base names from Windows records (plat 3, enc 1, lang 1033)
+    def get_name(name_id: int) -> str | None:
+        rec = name_table.getName(name_id, 3, 1, 1033)
+        return rec.toUnicode() if rec else None
+
+    orig_family = get_name(16) or get_name(1) or "Zen"
+    new_family = orig_family.replace("Zen", "Makumi")
+
+    # Construct description
+    description = (
+        f"{new_family} is a subset web font for Japanese punctuation marks based on "
+        f"{orig_family}, with OpenType chws features added."
+    )
+
+    # Update records across all platforms
+    for record in name_table.names:
+        nid = record.nameID
         try:
             val = record.toUnicode()
-            new_val = rename_zen_to_makumi(val)
-            if new_val != val:
-                record.string = new_val
+            if nid == 0:  # Copyright
+                if AUTHOR_COPYRIGHT not in val:
+                    record.string = f"{val.rstrip('.')}. {AUTHOR_COPYRIGHT}"
+            elif nid == 3:  # Unique Identifier
+                # e.g. 1.002;ZEN!;ZenMaruGothic-Regular -> 1.000;MKMI;MakumiMaruGothic-Regular
+                new_val = re.sub(r"^[^;]+;[^;]+;", "1.000;MKMI;", val)
+                record.string = new_val.replace("Zen", "Makumi")
+            elif nid == 5:  # Version
+                record.string = FONT_VERSION_STRING
+            elif nid in (1, 4, 6, 16):  # Family, Full Name, PostScript Name, Typographic Family
+                record.string = val.replace("Zen", "Makumi")
+            elif nid in (2, 17):  # Subfamily, Typographic Subfamily
+                pass  # Keep as is (Regular, Bold, etc.)
         except Exception:
             pass
+
+    # Ensure Description (NameID 10) is set for Windows and Mac platforms
+    name_table.setName(description, 10, 3, 1, 1033)
+    name_table.setName(description, 10, 1, 0, 0)
 
 
 async def add_chws_features(src_path: Path, dest_path: Path) -> None:
@@ -96,7 +136,7 @@ def subset_and_export(chws_ttf_path: Path, output_base_path: Path) -> None:
     subsetter.populate(text=YAKUMONO_CHARS)
     subsetter.subset(font)
 
-    update_name_table(font)
+    update_metadata(font)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
