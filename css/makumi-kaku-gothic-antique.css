@@ -1,0 +1,54 @@
+@font-face {
+  font-family: "Makumi Kaku Gothic Antique";
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src:
+    url("../fonts/makumi-kaku-gothic-antique-light.woff2") format("woff2"),
+    url("../fonts/makumi-kaku-gothic-antique-light.woff") format("woff"),
+    url("../fonts/makumi-kaku-gothic-antique-light.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Makumi Kaku Gothic Antique";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src:
+    url("../fonts/makumi-kaku-gothic-antique-regular.woff2") format("woff2"),
+    url("../fonts/makumi-kaku-gothic-antique-regular.woff") format("woff"),
+    url("../fonts/makumi-kaku-gothic-antique-regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Makumi Kaku Gothic Antique";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src:
+    url("../fonts/makumi-kaku-gothic-antique-medium.woff2") format("woff2"),
+    url("../fonts/makumi-kaku-gothic-antique-medium.woff") format("woff"),
+    url("../fonts/makumi-kaku-gothic-antique-medium.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Makumi Kaku Gothic Antique";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src:
+    url("../fonts/makumi-kaku-gothic-antique-bold.woff2") format("woff2"),
+    url("../fonts/makumi-kaku-gothic-antique-bold.woff") format("woff"),
+    url("../fonts/makumi-kaku-gothic-antique-bold.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Makumi Kaku Gothic Antique";
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+  src:
+    url("../fonts/makumi-kaku-gothic-antique-black.woff2") format("woff2"),
+    url("../fonts/makumi-kaku-gothic-antique-black.woff") format("woff"),
+    url("../fonts/makumi-kaku-gothic-antique-black.ttf") format("truetype");
+}

@@ -1,0 +1,54 @@
+@font-face {
+  font-family: "Makumi Maru Gothic";
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src:
+    url("../fonts/makumi-maru-gothic-light.woff2") format("woff2"),
+    url("../fonts/makumi-maru-gothic-light.woff") format("woff"),
+    url("../fonts/makumi-maru-gothic-light.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Makumi Maru Gothic";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src:
+    url("../fonts/makumi-maru-gothic-regular.woff2") format("woff2"),
+    url("../fonts/makumi-maru-gothic-regular.woff") format("woff"),
+    url("../fonts/makumi-maru-gothic-regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Makumi Maru Gothic";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src:
+    url("../fonts/makumi-maru-gothic-medium.woff2") format("woff2"),
+    url("../fonts/makumi-maru-gothic-medium.woff") format("woff"),
+    url("../fonts/makumi-maru-gothic-medium.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Makumi Maru Gothic";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src:
+    url("../fonts/makumi-maru-gothic-bold.woff2") format("woff2"),
+    url("../fonts/makumi-maru-gothic-bold.woff") format("woff"),
+    url("../fonts/makumi-maru-gothic-bold.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Makumi Maru Gothic";
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+  src:
+    url("../fonts/makumi-maru-gothic-black.woff2") format("woff2"),
+    url("../fonts/makumi-maru-gothic-black.woff") format("woff"),
+    url("../fonts/makumi-maru-gothic-black.ttf") format("truetype");
+}

@@ -1,0 +1,54 @@
+@font-face {
+  font-family: "Makumi Old Mincho";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src:
+    url("../fonts/makumi-old-mincho-regular.woff2") format("woff2"),
+    url("../fonts/makumi-old-mincho-regular.woff") format("woff"),
+    url("../fonts/makumi-old-mincho-regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Makumi Old Mincho";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src:
+    url("../fonts/makumi-old-mincho-medium.woff2") format("woff2"),
+    url("../fonts/makumi-old-mincho-medium.woff") format("woff"),
+    url("../fonts/makumi-old-mincho-medium.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Makumi Old Mincho";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src:
+    url("../fonts/makumi-old-mincho-semi-bold.woff2") format("woff2"),
+    url("../fonts/makumi-old-mincho-semi-bold.woff") format("woff"),
+    url("../fonts/makumi-old-mincho-semi-bold.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Makumi Old Mincho";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src:
+    url("../fonts/makumi-old-mincho-bold.woff2") format("woff2"),
+    url("../fonts/makumi-old-mincho-bold.woff") format("woff"),
+    url("../fonts/makumi-old-mincho-bold.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Makumi Old Mincho";
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+  src:
+    url("../fonts/makumi-old-mincho-black.woff2") format("woff2"),
+    url("../fonts/makumi-old-mincho-black.woff") format("woff"),
+    url("../fonts/makumi-old-mincho-black.ttf") format("truetype");
+}
