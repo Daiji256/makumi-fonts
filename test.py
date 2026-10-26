@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import itertools
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -24,6 +25,7 @@ YAKUMONO_SET = set(YAKUMONO_CHARS)
 EXPECTED_CHAR_CODES = {ord(c) for c in YAKUMONO_CHARS}
 
 FONTS_DIR = Path("fonts")
+CSS_DIR = Path("css")
 SOURCES_DIR = Path("tmp/sources")
 SPECIMENS_DIR = Path("specimens")
 SPECIMENS_DIFF_DIR = Path("tmp/specimens_diff")
@@ -469,6 +471,55 @@ def test_visual_specimens_and_regression() -> None:
         )
 
 
+def test_css_files() -> None:
+    """Verify that CSS files exist, and that all referenced font URLs resolve to existing files."""
+    print("\n--- Test 6: CSS Distribution Files ---")
+    assert CSS_DIR.is_dir(), f"{CSS_DIR} directory does not exist"
+
+    expected_slugs = {
+        "makumi",
+        "makumi-antique",
+        "makumi-antique-soft",
+        "makumi-kaku-gothic-antique",
+        "makumi-kaku-gothic-new",
+        "makumi-kurenaido",
+        "makumi-maru-gothic",
+        "makumi-old-mincho",
+    }
+    actual_css = {
+        p.stem for p in CSS_DIR.glob("*.css") if not p.name.endswith(".min.css")
+    }
+    assert actual_css == expected_slugs, (
+        f"Unexpected CSS files: {actual_css ^ expected_slugs}"
+    )
+
+    for slug in expected_slugs:
+        for ext in (".css", ".min.css"):
+            css_path = CSS_DIR / f"{slug}{ext}"
+            assert css_path.exists(), f"Missing CSS file: {css_path}"
+            assert css_path.stat().st_size > 0, f"Empty CSS file: {css_path}"
+
+    url_pattern = re.compile(r'url\("([^"]+)"\)')
+    referenced_fonts: set[str] = set()
+
+    for css_file in CSS_DIR.glob("*.css"):
+        content = css_file.read_text(encoding="utf-8")
+        for match in url_pattern.finditer(content):
+            rel_url = match.group(1)
+            target = (CSS_DIR / rel_url).resolve()
+            assert target.exists(), (
+                f"Broken URL in {css_file.name}: {rel_url} -> {target}"
+            )
+            referenced_fonts.add(target.name)
+
+    assert len(referenced_fonts) == len(FONTS_INFO) * len(SIZE_RANGES), (
+        f"Not all font files are referenced in CSS: {len(referenced_fonts)}"
+    )
+    print(
+        f"  All {len(expected_slugs) * 2} CSS files verified with {len(referenced_fonts)} valid font references."
+    )
+
+
 def main() -> None:
     print("=== Makumi Fonts Test Suite ===")
     test_file_completeness_and_sizes()
@@ -476,6 +527,7 @@ def main() -> None:
     test_metadata_validity()
     test_chws_feature_compaction()
     test_visual_specimens_and_regression()
+    test_css_files()
     print("\n==================================================")
     print("       ALL TESTS PASSED SUCCESSFULLY!       ")
     print("==================================================")

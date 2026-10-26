@@ -26,6 +26,7 @@ YAKUMONO_CHARS = "、。，．・：；（）「」『』［］｛｝【】〈�
 
 SOURCES_DIR = Path("tmp/sources")
 OUTPUT_DIR = Path("fonts")
+CSS_DIR = Path("css")
 
 FONT_VERSION = "1.000"
 FONT_REVISION = float(FONT_VERSION)
@@ -221,6 +222,58 @@ async def process_font(src_path: Path, work_dir: Path) -> None:
     subset_and_export(chws_dest, OUTPUT_DIR / stem)
 
 
+def generate_css() -> None:
+    """Generate family and all-in-one CSS files for jsDelivr distribution."""
+    CSS_DIR.mkdir(parents=True, exist_ok=True)
+    families: dict[str, list[tuple[str, int, str]]] = {}
+
+    for p in sorted(OUTPUT_DIR.glob("*.ttf")):
+        font = TTFont(p)
+        names = {
+            r.nameID: r.toUnicode()
+            for r in font["name"].names
+            if r.platformID == 3 and r.langID == 1033
+        }
+        fam = names.get(16) or names[1]
+        weight = font["OS/2"].usWeightClass
+        slug = fam.lower().replace(" ", "-")
+        families.setdefault(slug, []).append((fam, weight, p.stem))
+
+    all_css_blocks: list[str] = []
+
+    for slug, entries in sorted(families.items()):
+        entries.sort(key=lambda e: e[1])
+        blocks = [
+            f"@font-face {{\n"
+            f'  font-family: "{fam}";\n'
+            f"  font-style: normal;\n"
+            f"  font-weight: {weight};\n"
+            f"  font-display: swap;\n"
+            f"  src:\n"
+            f'    url("../fonts/{stem}.woff2") format("woff2"),\n'
+            f'    url("../fonts/{stem}.woff") format("woff"),\n'
+            f'    url("../fonts/{stem}.ttf") format("truetype");\n'
+            f"}}"
+            for fam, weight, stem in entries
+        ]
+        family_css = "\n\n".join(blocks) + "\n"
+        (CSS_DIR / f"{slug}.css").write_text(family_css, encoding="utf-8")
+        minified = (
+            re.sub(r"\s+", " ", re.sub(r"\s*([{:;,])\s*", r"\1", family_css)).strip()
+            + "\n"
+        )
+        (CSS_DIR / f"{slug}.min.css").write_text(minified, encoding="utf-8")
+        all_css_blocks.extend(blocks)
+
+    combined_css = "\n\n".join(all_css_blocks) + "\n"
+    (CSS_DIR / "makumi.css").write_text(combined_css, encoding="utf-8")
+    minified_combined = (
+        re.sub(r"\s+", " ", re.sub(r"\s*([{:;,])\s*", r"\1", combined_css)).strip()
+        + "\n"
+    )
+    (CSS_DIR / "makumi.min.css").write_text(minified_combined, encoding="utf-8")
+
+
 async def main() -> None:
     download_source_fonts()
 
@@ -236,7 +289,8 @@ async def main() -> None:
         for src in source_files:
             await process_font(src, work_dir)
 
-    print(f"Build complete: all fonts generated in {OUTPUT_DIR}/")
+    generate_css()
+    print(f"Build complete: fonts in {OUTPUT_DIR}/, CSS in {CSS_DIR}/")
 
 
 if __name__ == "__main__":
