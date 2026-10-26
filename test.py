@@ -165,7 +165,12 @@ SAMPLE_LINE2 = "【夏目漱石】　これは〝美しい〟文字組み。（�
 
 def find_source(filename: str) -> Path:
     """Find source Zen font path in tmp/sources/<rev>/."""
-    return next(SOURCES_DIR.glob(f"*/{filename}"))
+    matches = list(SOURCES_DIR.glob(f"*/{filename}"))
+    if not matches:
+        raise RuntimeError(
+            f"Source font '{filename}' not found in {SOURCES_DIR}. Please run 'uv run build.py' first."
+        )
+    return matches[0]
 
 
 def test_file_completeness_and_sizes() -> None:
@@ -434,16 +439,22 @@ def test_visual_specimens_and_regression() -> None:
     SPECIMENS_DIFF_DIR.mkdir(parents=True, exist_ok=True)
 
     update_mode = "--update" in sys.argv or "-u" in sys.argv
-    matches = created = updated = diff_count = 0
+    matches = created = updated = diff_count = missing_count = 0
 
     for prefix, zen_file, display_name in FONTS_INFO:
         specimen_file = SPECIMENS_DIR / f"{prefix}.png"
         new_img = generate_specimen_card(prefix, zen_file, display_name)
 
         if not specimen_file.exists():
-            new_img.save(specimen_file)
-            created += 1
-            print(f"  [CREATED]  {specimen_file.name}")
+            if update_mode:
+                new_img.save(specimen_file)
+                created += 1
+                print(f"  [CREATED]  {specimen_file.name}")
+            else:
+                missing_count += 1
+                print(
+                    f"  [MISSING]  {specimen_file.name} (run with '--update' to generate)"
+                )
             continue
 
         old_img = Image.open(specimen_file).convert("RGB")
@@ -463,9 +474,13 @@ def test_visual_specimens_and_regression() -> None:
                 print(f"  [DIFF]     {specimen_file.name} (diff saved to {diff_file})")
 
     print(
-        f"\n  Visual Specimen Summary: {created} created, {matches} matched, {updated} updated, {diff_count} diffs."
+        f"\n  Visual Specimen Summary: {created} created, {matches} matched, {updated} updated, "
+        f"{diff_count} diffs, {missing_count} missing."
     )
     if not update_mode:
+        assert missing_count == 0, (
+            f"Baseline specimen(s) missing for {missing_count} font(s). Run with '--update' to generate baselines."
+        )
         assert diff_count == 0, (
             f"Visual regression detected in {diff_count} specimen(s). Run with '--update' to accept changes."
         )
