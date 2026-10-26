@@ -1,7 +1,8 @@
 # /// script
+# requires-python = ">=3.11"
 # dependencies = [
-#     "chws-tool",
-#     "fonttools[woff]",
+#     "chws-tool==1.4.5",
+#     "fonttools==4.67.0",
 # ]
 # ///
 
@@ -11,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-import sys
+import tempfile
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -24,13 +25,11 @@ from fontTools.ttLib import TTFont
 YAKUMONO_CHARS = "、。，．・：；（）「」『』［］｛｝【】〈〉《》〔〕〝〟　"
 
 SOURCES_DIR = Path("tmp/sources")
-NORMALIZED_CACHE_DIR = Path("tmp/normalized")
 OUTPUT_DIR = Path("fonts")
-CHWS_CACHE_DIR = Path("tmp/chws")
 
-FONT_VERSION_STRING = "Version 1.000"
-FONT_REVISION = 1.0
-VENDOR_ID = b"MKMI"
+FONT_VERSION = "1.000"
+FONT_REVISION = float(FONT_VERSION)
+VENDOR_ID = "MKMI"
 AUTHOR_COPYRIGHT = "Copyright 2026 Daiji256."
 
 BUILD_DATE = "2026-10-25T10:00:00Z"
@@ -82,46 +81,45 @@ SOURCE_REPOS: list[tuple[str, str, list[str]]] = [
 
 def download_source_fonts() -> None:
     """Download source Zen fonts if not already cached."""
-    SOURCES_DIR.mkdir(parents=True, exist_ok=True)
     for repo, rev, filenames in SOURCE_REPOS:
+        rev_dir = SOURCES_DIR / rev[:7]
+        rev_dir.mkdir(parents=True, exist_ok=True)
         for filename in filenames:
-            dest = SOURCES_DIR / filename
+            dest = rev_dir / filename
             if not dest.exists():
                 print(f"Downloading {filename}...")
                 url = f"https://raw.githubusercontent.com/{repo}/{rev}/fonts/ttf/{filename}"
+                tmp = dest.with_suffix(".tmp")
                 req = urllib.request.Request(
                     url, headers={"User-Agent": "makumi-fonts-build/1.0"}
                 )
-                with urllib.request.urlopen(req) as resp, open(dest, "wb") as f:
+                with (
+                    urllib.request.urlopen(req, timeout=30) as resp,
+                    open(tmp, "wb") as f,
+                ):
                     f.write(resp.read())
+                tmp.replace(dest)
 
 
-def to_kebab_case(filename: str) -> str:
-    """Convert PascalCase font filename to kebab-case."""
-    base = re.sub(r"^Zen", "Makumi", filename.removesuffix(".ttf"))
-    return re.sub(r"([a-z0-9])([A-Z])", r"\1-\2", base).lower()
+def output_stem(filename: str) -> str:
+    """Convert PascalCase Zen font filename to kebab-case Makumi name."""
+    base = filename.removesuffix(".ttf").removeprefix("Zen")
+    return "makumi-" + re.sub(r"([a-z0-9])([A-Z])", r"\1-\2", base).lower()
 
 
 def update_metadata(font: TTFont) -> None:
     """Update font metadata (name, head, OS/2 tables) for Makumi release."""
-    if "head" in font:
-        font["head"].fontRevision = FONT_REVISION
-        font["head"].modified = BUILD_TIMESTAMP
-    font.recalcTimestamp = False
-
-    if "OS/2" in font:
-        font["OS/2"].achVendID = VENDOR_ID
-
-    if "name" not in font:
-        return
+    font["head"].fontRevision = FONT_REVISION
+    font["head"].modified = BUILD_TIMESTAMP
+    font["OS/2"].achVendID = VENDOR_ID
 
     name_table = font["name"]
 
-    def get_name(name_id: int) -> str | None:
+    def get_name(name_id: int) -> str:
         rec = name_table.getName(name_id, 3, 1, 1033)
-        return rec.toUnicode() if rec else None
+        return rec.toUnicode() if rec else ""
 
-    orig_family = get_name(16) or get_name(1) or "Zen"
+    orig_family = get_name(16) or get_name(1)
     new_family = orig_family.replace("Zen", "Makumi")
     description = (
         f"{new_family} is a subset web font for Japanese punctuation marks based on "
@@ -130,41 +128,29 @@ def update_metadata(font: TTFont) -> None:
 
     for record in name_table.names:
         nid = record.nameID
-        try:
-            val = record.toUnicode()
-            if nid == 0 and AUTHOR_COPYRIGHT not in val:
-                record.string = f"{val.rstrip('.')}. {AUTHOR_COPYRIGHT}"
-            elif nid == 3:
-                record.string = re.sub(r"^[^;]+;[^;]+;", "1.000;MKMI;", val).replace(
-                    "Zen", "Makumi"
-                )
-            elif nid == 5:
-                record.string = FONT_VERSION_STRING
-            elif nid in (1, 4, 6, 16):
-                record.string = val.replace("Zen", "Makumi")
-        except (UnicodeDecodeError, KeyError):
-            pass
+        val = record.toUnicode()
+        if nid == 0 and AUTHOR_COPYRIGHT not in val:
+            record.string = f"{val.rstrip('.')}. {AUTHOR_COPYRIGHT}"
+        elif nid == 3:
+            record.string = re.sub(
+                r"^[^;]+;[^;]+;", f"{FONT_VERSION};{VENDOR_ID};", val
+            ).replace("Zen", "Makumi")
+        elif nid == 5:
+            record.string = f"Version {FONT_VERSION}"
+        elif nid in (1, 4, 6, 16):
+            record.string = val.replace("Zen", "Makumi")
 
     name_table.setName(description, 10, 3, 1, 1033)
-    name_table.setName(description, 10, 1, 0, 0)
 
 
-def normalize_font_metrics(src_path: Path) -> Path:
+def normalize_font_metrics(src_path: Path, dest_path: Path) -> Path:
     """Normalize non-1000 advance widths of fullwidth punctuation (e.g. Zen Kurenaido)."""
     font = TTFont(src_path, recalcTimestamp=False)
-    font.recalcTimestamp = False
-    hmtx, glyf, cmap = font.get("hmtx"), font.get("glyf"), font.getBestCmap()
-    if not hmtx or not glyf or not cmap:
-        return src_path
+    hmtx, glyf, cmap = font["hmtx"], font["glyf"], font.getBestCmap()
 
     if not any(hmtx[cmap[ord(c)]][0] != 1000 for c in YAKUMONO_CHARS if ord(c) in cmap):
         return src_path
 
-    dest_path = NORMALIZED_CACHE_DIR / src_path.name
-    if dest_path.exists():
-        return dest_path
-
-    NORMALIZED_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     for chars, shift_fn in [
         ("「『【〈《〔〝", lambda d: d),
         ("」』】〉》〕〟、。", lambda _: 0),
@@ -194,15 +180,14 @@ async def add_chws_features(src_path: Path, dest_path: Path) -> None:
     config = Config.default.clone()
     config.fullwidth_advance = 1000
     builder = Builder(str(src_path), config=config)
-    await builder.build()
-    dest_path.parent.mkdir(parents=True, exist_ok=True)
-    builder.save(dest_path)
+    res = await builder.build_and_save(dest_path)
+    if not res:
+        raise RuntimeError(f"Failed to inject chws features into {src_path.name}")
 
 
 def subset_and_export(chws_ttf_path: Path, output_base_path: Path) -> None:
     """Subset font to YAKUMONO_CHARS and export TTF, WOFF, and WOFF2 formats."""
     font = TTFont(chws_ttf_path, recalcTimestamp=False)
-    font.recalcTimestamp = False
 
     options = Options()
     options.layout_features = ["*"]
@@ -224,30 +209,32 @@ def subset_and_export(chws_ttf_path: Path, output_base_path: Path) -> None:
         font.save(output_base_path.with_suffix(ext))
 
 
-async def process_font(src_path: Path) -> None:
+async def process_font(src_path: Path, work_dir: Path) -> None:
     """Process a single font: normalize metrics, inject chws, subset, and export."""
-    kebab_name = to_kebab_case(src_path.name)
-    chws_cache = CHWS_CACHE_DIR / src_path.name
-    if not chws_cache.exists():
-        normalized_src = normalize_font_metrics(src_path)
-        print(f"  Injecting chws: {src_path.name}...")
-        await add_chws_features(normalized_src, chws_cache)
+    stem = output_stem(src_path.name)
+    norm_dest = work_dir / f"norm_{src_path.name}"
+    chws_dest = work_dir / f"chws_{src_path.name}"
 
-    print(f"  {src_path.name} -> {kebab_name}")
-    subset_and_export(chws_cache, OUTPUT_DIR / kebab_name)
+    norm_src = normalize_font_metrics(src_path, norm_dest)
+    await add_chws_features(norm_src, chws_dest)
+    print(f"  {src_path.name} -> {stem}")
+    subset_and_export(chws_dest, OUTPUT_DIR / stem)
 
 
 async def main() -> None:
     download_source_fonts()
 
-    source_fonts = sorted(SOURCES_DIR.glob("*.ttf"))
-    if not source_fonts:
-        print(f"Error: No TTF files found in {SOURCES_DIR}.", file=sys.stderr)
-        sys.exit(1)
+    source_files = [
+        SOURCES_DIR / rev[:7] / filename
+        for _, rev, filenames in SOURCE_REPOS
+        for filename in filenames
+    ]
 
-    print(f"Building {len(source_fonts)} fonts...")
-    for src in source_fonts:
-        await process_font(src)
+    print(f"Building {len(source_files)} fonts...")
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        work_dir = Path(tmp_dir)
+        for src in source_files:
+            await process_font(src, work_dir)
 
     print(f"Build complete: all fonts generated in {OUTPUT_DIR}/")
 

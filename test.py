@@ -1,7 +1,8 @@
 # /// script
+# requires-python = ">=3.11"
 # dependencies = [
-#     "fonttools[woff]",
-#     "pillow",
+#     "fonttools[woff,woff2]==4.67.0",
+#     "pillow==13.0.0",
 # ]
 # ///
 
@@ -10,8 +11,11 @@
 from __future__ import annotations
 
 import itertools
+import sys
+from datetime import datetime
 from pathlib import Path
 
+from fontTools.misc import timeTools
 from fontTools.ttLib import TTFont
 from PIL import Image, ImageChops, ImageDraw, ImageFont
 
@@ -23,6 +27,11 @@ FONTS_DIR = Path("fonts")
 SOURCES_DIR = Path("tmp/sources")
 SPECIMENS_DIR = Path("specimens")
 SPECIMENS_DIFF_DIR = Path("tmp/specimens_diff")
+
+BUILD_DATE = "2026-10-25T10:00:00Z"
+BUILD_TIMESTAMP = timeTools.timestampSinceEpoch(
+    datetime.fromisoformat(BUILD_DATE).timestamp()
+)
 
 SIZE_RANGES = {
     ".ttf": (5000, 15000),
@@ -152,12 +161,21 @@ SAMPLE_LINE1 = "「『吾輩は猫である』、名前はまだ無い。」"
 SAMPLE_LINE2 = "【夏目漱石】　これは〝美しい〟文字組み。（注：テスト）"
 
 
+def find_source(filename: str) -> Path:
+    """Find source Zen font path in tmp/sources/<rev>/."""
+    return next(SOURCES_DIR.glob(f"*/{filename}"))
+
+
 def test_file_completeness_and_sizes() -> None:
-    """Verify that all 23 font families exist in TTF, WOFF, and WOFF2 within expected size ranges."""
-    print("\n--- Test 1: File Completeness & Size Range ---")
+    """Verify that all font families exist in TTF, WOFF, and WOFF2 within expected size ranges."""
+    print("\n--- Test 1: File Completeness, Sizes & Format Parity ---")
     assert FONTS_DIR.is_dir(), f"{FONTS_DIR} directory does not exist"
 
     for prefix, _, _ in FONTS_INFO:
+        ttf = TTFont(FONTS_DIR / f"{prefix}.ttf")
+        ttf_cmap = ttf.getBestCmap()
+        ttf_glyphs = ttf.getGlyphOrder()
+
         for ext, (min_sz, max_sz) in SIZE_RANGES.items():
             p = FONTS_DIR / f"{prefix}{ext}"
             assert p.exists(), f"Missing font file: {p}"
@@ -165,15 +183,21 @@ def test_file_completeness_and_sizes() -> None:
             assert min_sz <= sz <= max_sz, (
                 f"{p} size {sz} out of range ({min_sz}-{max_sz})"
             )
+            if ext in (".woff", ".woff2"):
+                w = TTFont(p)
+                assert w.getBestCmap() == ttf_cmap, f"[{p.name}] cmap differs from TTF"
+                assert w.getGlyphOrder() == ttf_glyphs, (
+                    f"[{p.name}] glyph order differs from TTF"
+                )
 
     print(
-        f"  All {len(FONTS_INFO) * len(SIZE_RANGES)} font files verified within expected size ranges."
+        f"  All {len(FONTS_INFO) * len(SIZE_RANGES)} font files verified (sizes and TTF/WOFF/WOFF2 parity)."
     )
 
 
 def test_character_coverage_and_glyphs() -> None:
-    """Verify that every font contains exactly the 28 required punctuation characters."""
-    print("\n--- Test 2: Character & Glyph Coverage ---")
+    """Verify character coverage, glyph outlines, and advance metrics."""
+    print("\n--- Test 2: Character, Glyph & Advance Coverage ---")
     for prefix, _, _ in FONTS_INFO:
         font = TTFont(FONTS_DIR / f"{prefix}.ttf")
         cmap = font.getBestCmap()
@@ -182,33 +206,37 @@ def test_character_coverage_and_glyphs() -> None:
             f"[{prefix}] Character mismatch: diff={actual_codes ^ EXPECTED_CHAR_CODES}"
         )
 
-        glyf = font.get("glyf")
-        if glyf:
-            for code in EXPECTED_CHAR_CODES:
-                contours = glyf[cmap[code]].numberOfContours
-                if chr(code) == "　":
-                    assert contours == 0, (
-                        f"[{prefix}] Fullwidth space should have 0 contours"
-                    )
-                else:
-                    assert contours != 0, (
-                        f"[{prefix}] Character {chr(code)!r} has empty glyph"
-                    )
+        glyf = font["glyf"]
+        hmtx = font["hmtx"]
+        for code in EXPECTED_CHAR_CODES:
+            gid = cmap[code]
+            adv, _ = hmtx[gid]
+            assert adv == 1000, f"[{prefix}] Non-1000 advance ({adv}) for {chr(code)!r}"
+
+            contours = glyf[gid].numberOfContours
+            if chr(code) == "　":
+                assert contours == 0, (
+                    f"[{prefix}] Fullwidth space should have 0 contours"
+                )
+            else:
+                assert contours != 0, (
+                    f"[{prefix}] Character {chr(code)!r} has empty glyph"
+                )
 
     print(
-        "  Character coverage verified: Exactly 28 punctuation characters in all fonts."
+        f"  Character coverage verified: Exactly {len(EXPECTED_CHAR_CODES)} characters at 1000 advance in all fonts."
     )
 
 
 def test_metadata_validity() -> None:
     """Verify metadata fields across all fonts."""
     print("\n--- Test 3: Metadata & OpenType Tables ---")
-    for prefix, _, _ in FONTS_INFO:
+    for prefix, _, display_name in FONTS_INFO:
         font = TTFont(FONTS_DIR / f"{prefix}.ttf")
 
         assert font["head"].fontRevision == 1.0
-        assert font["head"].modified > 0
-        assert font["OS/2"].achVendID in ("MKMI", b"MKMI")
+        assert font["head"].modified == BUILD_TIMESTAMP
+        assert font["OS/2"].achVendID == "MKMI"
 
         gpos_features = {
             r.FeatureTag for r in font["GPOS"].table.FeatureList.FeatureRecord
@@ -220,14 +248,22 @@ def test_metadata_validity() -> None:
         }
         assert {"vert", "vrt2"}.issubset(gsub_features)
 
+        for r in font["name"].names:
+            val = r.toUnicode()
+            if r.nameID not in (0, 10):
+                assert "Zen" not in val, (
+                    f"[{prefix}] 'Zen' found in nameID {r.nameID} ({r.platformID},{r.platEncID}): {val}"
+                )
+
         names = {
             r.nameID: r.toUnicode()
             for r in font["name"].names
             if r.platformID == 3 and r.langID == 1033
         }
         assert "Copyright 2026 Daiji256." in names[0] and "The Zen" in names[0]
-        assert names[1].startswith("Makumi") and "Zen" not in names[1]
-        assert names[4].startswith("Makumi") and "Zen" not in names[4]
+        assert names[1].startswith("Makumi")
+        assert names[3] == f"1.000;MKMI;{names[6]}"
+        assert names[4] == display_name
         assert names[5] == "Version 1.000"
         assert names[6].startswith("Makumi") and " " not in names[6]
         assert names[8] == "Positype"
@@ -237,6 +273,8 @@ def test_metadata_validity() -> None:
         assert (
             "subset web font for Japanese punctuation marks based on Zen" in names[10]
         )
+        if 16 in names:
+            assert names[16].startswith("Makumi")
 
     print(
         "  Metadata verified: Version 1.000, Vendor MKMI, proper copyright, and complete credits."
@@ -271,15 +309,15 @@ def draw_text_run(
 
 
 def test_chws_feature_compaction() -> None:
-    """Verify that chws feature reduces advance width across all 23 fonts and weights."""
-    print("\n--- Test 4: chws Feature Compaction Across All 23 Fonts & Weights ---")
+    """Verify that chws feature reduces advance width across all fonts and weights."""
+    print("\n--- Test 4: chws Feature Compaction ---")
     dummy_draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
     for prefix, zen_file, _ in FONTS_INFO:
         m_font = ImageFont.truetype(
             str(FONTS_DIR / f"{prefix}.ttf"), 32, layout_engine=ImageFont.Layout.RAQM
         )
         z_font = ImageFont.truetype(
-            str(SOURCES_DIR / zen_file), 32, layout_engine=ImageFont.Layout.RAQM
+            str(find_source(zen_file)), 32, layout_engine=ImageFont.Layout.RAQM
         )
 
         w_off = draw_text_run(
@@ -291,15 +329,15 @@ def test_chws_feature_compaction() -> None:
 
         reduction_px = w_off - w_on
         reduction_pct = (reduction_px / w_off) * 100
-        assert reduction_px >= 40.0, (
-            f"[{prefix}] Insufficient compaction: reduction={reduction_px:.1f}px"
+        assert reduction_px == 48.0, (
+            f"[{prefix}] Expected 48.0px compaction, got {reduction_px:.1f}px"
         )
         print(
             f"  [{prefix:35}] -{reduction_px:.1f}px (-{reduction_pct:.1f}%) | OFF: {w_off:.1f}px -> ON: {w_on:.1f}px"
         )
 
     print(
-        "  chws feature compaction verified: All 23 fonts tighten punctuation pairs reliably."
+        "  chws feature compaction verified: All fonts tighten punctuation pairs reliably."
     )
 
 
@@ -310,7 +348,7 @@ def generate_specimen_card(
 ) -> Image.Image:
     """Generate a clean visual specimen card (720x280) comparing chws OFF vs ON."""
     makumi_path = FONTS_DIR / f"{makumi_prefix}.ttf"
-    zen_path = SOURCES_DIR / zen_filename
+    zen_path = find_source(zen_filename)
 
     raqm = ImageFont.Layout.RAQM
     f_m_body = ImageFont.truetype(str(makumi_path), 24, layout_engine=raqm)
@@ -393,7 +431,9 @@ def test_visual_specimens_and_regression() -> None:
     SPECIMENS_DIR.mkdir(parents=True, exist_ok=True)
     SPECIMENS_DIFF_DIR.mkdir(parents=True, exist_ok=True)
 
-    matches = created = updated = 0
+    update_mode = "--update" in sys.argv or "-u" in sys.argv
+    matches = created = updated = diff_count = 0
+
     for prefix, zen_file, display_name in FONTS_INFO:
         specimen_file = SPECIMENS_DIR / f"{prefix}.png"
         new_img = generate_specimen_card(prefix, zen_file, display_name)
@@ -410,15 +450,23 @@ def test_visual_specimens_and_regression() -> None:
             matches += 1
             print(f"  [MATCH]    {specimen_file.name}")
         else:
-            updated += 1
             diff_file = SPECIMENS_DIFF_DIR / f"{prefix}_diff.png"
             _save_diff_report(old_img, new_img, diff, diff_file, display_name)
-            new_img.save(specimen_file)
-            print(f"  [UPDATED]  {specimen_file.name} (diff saved to {diff_file})")
+            if update_mode:
+                new_img.save(specimen_file)
+                updated += 1
+                print(f"  [UPDATED]  {specimen_file.name} (diff saved to {diff_file})")
+            else:
+                diff_count += 1
+                print(f"  [DIFF]     {specimen_file.name} (diff saved to {diff_file})")
 
     print(
-        f"\n  Visual Specimen Summary: {created} created, {matches} matched, {updated} updated."
+        f"\n  Visual Specimen Summary: {created} created, {matches} matched, {updated} updated, {diff_count} diffs."
     )
+    if not update_mode:
+        assert diff_count == 0, (
+            f"Visual regression detected in {diff_count} specimen(s). Run with '--update' to accept changes."
+        )
 
 
 def main() -> None:
@@ -429,7 +477,7 @@ def main() -> None:
     test_chws_feature_compaction()
     test_visual_specimens_and_regression()
     print("\n==================================================")
-    print("       ALL TESTS PASSED SUCCESSFULLY! (5/5)       ")
+    print("       ALL TESTS PASSED SUCCESSFULLY!       ")
     print("==================================================")
 
 
