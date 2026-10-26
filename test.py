@@ -5,29 +5,16 @@
 # ]
 # ///
 
-"""Test suite and visual specimen generator for makumi-fonts.
-
-Tests:
-1. File completeness & sizes: Verify all 23 fonts exist in TTF, WOFF, and WOFF2 within valid size ranges.
-2. Character coverage & glyphs: Verify exactly 28 punctuation characters in cmap, with no extra or missing glyphs.
-3. Metadata completeness: Verify name, head, OS/2, GPOS/GSUB table records across all fonts.
-4. chws feature compaction: Verify that chws properly compacts text across all 23 fonts and weights.
-5. Visual specimens & regression:
-   Generate specimen images in specimens/ (combining Makumi punctuation and Zen body text, chws OFF vs ON).
-   Compare against existing specimen files:
-   - If identical: do not touch the existing file (preventing binary Git diffs).
-   - If visual diff detected: update specimens/ and output Before/After/Diff comparison images to
-     tmp/specimens_diff/ (untracked).
-"""
+"""Test suite and visual specimen generator for makumi-fonts."""
 
 from __future__ import annotations
 
+import itertools
 from pathlib import Path
 
 from fontTools.ttLib import TTFont
 from PIL import Image, ImageChops, ImageDraw, ImageFont
 
-# 28 punctuation characters (same as in build.py)
 YAKUMONO_CHARS = "、。，．・：；（）「」『』［］｛｝【】〈〉《》〔〕〝〟　"
 YAKUMONO_SET = set(YAKUMONO_CHARS)
 EXPECTED_CHAR_CODES = {ord(c) for c in YAKUMONO_CHARS}
@@ -37,9 +24,13 @@ SOURCES_DIR = Path("tmp/sources")
 SPECIMENS_DIR = Path("specimens")
 SPECIMENS_DIFF_DIR = Path("tmp/specimens_diff")
 
-# All 23 font families in alphabetical order with Zen source mapping and display names
+SIZE_RANGES = {
+    ".ttf": (5000, 15000),
+    ".woff": (3500, 8000),
+    ".woff2": (2000, 6000),
+}
+
 FONTS_INFO: list[tuple[str, str, str]] = [
-    # 1. Zen Antique (2 fonts)
     (
         "makumi-antique-regular",
         "ZenAntique-Regular.ttf",
@@ -50,7 +41,6 @@ FONTS_INFO: list[tuple[str, str, str]] = [
         "ZenAntiqueSoft-Regular.ttf",
         "Makumi Antique Soft Regular",
     ),
-    # 2. Zen Kaku Gothic Antique (5 fonts)
     (
         "makumi-kaku-gothic-antique-light",
         "ZenKakuGothicAntique-Light.ttf",
@@ -76,7 +66,6 @@ FONTS_INFO: list[tuple[str, str, str]] = [
         "ZenKakuGothicAntique-Black.ttf",
         "Makumi Kaku Gothic Antique Black",
     ),
-    # 3. Zen Kaku Gothic New (5 fonts)
     (
         "makumi-kaku-gothic-new-light",
         "ZenKakuGothicNew-Light.ttf",
@@ -102,13 +91,11 @@ FONTS_INFO: list[tuple[str, str, str]] = [
         "ZenKakuGothicNew-Black.ttf",
         "Makumi Kaku Gothic New Black",
     ),
-    # 4. Zen Kurenaido (1 font)
     (
         "makumi-kurenaido-regular",
         "ZenKurenaido-Regular.ttf",
         "Makumi Kurenaido Regular",
     ),
-    # 5. Zen Maru Gothic (5 fonts)
     (
         "makumi-maru-gothic-light",
         "ZenMaruGothic-Light.ttf",
@@ -134,7 +121,6 @@ FONTS_INFO: list[tuple[str, str, str]] = [
         "ZenMaruGothic-Black.ttf",
         "Makumi Maru Gothic Black",
     ),
-    # 6. Zen Old Mincho (5 fonts)
     (
         "makumi-old-mincho-regular",
         "ZenOldMincho-Regular.ttf",
@@ -162,80 +148,51 @@ FONTS_INFO: list[tuple[str, str, str]] = [
     ),
 ]
 
-EXPECTED_FAMILIES = [info[0] for info in FONTS_INFO]
-
-# Representative sample texts showcasing punctuation combinations, double minutes, and fullwidth space
 SAMPLE_LINE1 = "「『吾輩は猫である』、名前はまだ無い。」"
 SAMPLE_LINE2 = "【夏目漱石】　これは〝美しい〟文字組み。（注：テスト）"
 
 
-def test_file_completeness_and_sizes():
-    """Verify that all 23 font families exist in TTF, WOFF, and WOFF2 formats."""
+def test_file_completeness_and_sizes() -> None:
+    """Verify that all 23 font families exist in TTF, WOFF, and WOFF2 within expected size ranges."""
     print("\n--- Test 1: File Completeness & Size Range ---")
-    assert FONTS_DIR.exists(), f"{FONTS_DIR} directory does not exist"
+    assert FONTS_DIR.is_dir(), f"{FONTS_DIR} directory does not exist"
 
-    total_files = 0
-    for prefix in EXPECTED_FAMILIES:
-        for ext in [".ttf", ".woff", ".woff2"]:
+    for prefix, _, _ in FONTS_INFO:
+        for ext, (min_sz, max_sz) in SIZE_RANGES.items():
             p = FONTS_DIR / f"{prefix}{ext}"
             assert p.exists(), f"Missing font file: {p}"
             sz = p.stat().st_size
-            total_files += 1
+            assert min_sz <= sz <= max_sz, (
+                f"{p} size {sz} out of range ({min_sz}-{max_sz})"
+            )
 
-            if ext == ".ttf":
-                assert 5000 <= sz <= 15000, (
-                    f"{p} size {sz} is out of expected TTF range (5KB-15KB)"
-                )
-            elif ext == ".woff":
-                assert 3500 <= sz <= 8000, (
-                    f"{p} size {sz} is out of expected WOFF range (3.5KB-8KB)"
-                )
-            elif ext == ".woff2":
-                assert 2000 <= sz <= 6000, (
-                    f"{p} size {sz} is out of expected WOFF2 range (2KB-6KB)"
-                )
-
-    assert total_files == 69, f"Expected 69 font files, found {total_files}"
-    print("  All 69 font files verified within expected size ranges.")
+    print(
+        f"  All {len(FONTS_INFO) * len(SIZE_RANGES)} font files verified within expected size ranges."
+    )
 
 
-def test_character_coverage_and_glyphs():
+def test_character_coverage_and_glyphs() -> None:
     """Verify that every font contains exactly the 28 required punctuation characters."""
     print("\n--- Test 2: Character & Glyph Coverage ---")
-    for prefix in EXPECTED_FAMILIES:
-        ttf_path = FONTS_DIR / f"{prefix}.ttf"
-        font = TTFont(ttf_path)
+    for prefix, _, _ in FONTS_INFO:
+        font = TTFont(FONTS_DIR / f"{prefix}.ttf")
         cmap = font.getBestCmap()
-
-        # Check character set equality
         actual_codes = set(cmap.keys())
-        missing = EXPECTED_CHAR_CODES - actual_codes
-        extra = actual_codes - EXPECTED_CHAR_CODES
-
-        assert not missing, (
-            f"[{prefix}] Missing characters: {[chr(c) for c in missing]}"
-        )
-        assert not extra, (
-            f"[{prefix}] Unexpected extra characters: {[chr(c) for c in extra]}"
-        )
-        assert len(actual_codes) == 28, (
-            f"[{prefix}] Expected 28 characters, found {len(actual_codes)}"
+        assert actual_codes == EXPECTED_CHAR_CODES, (
+            f"[{prefix}] Character mismatch: diff={actual_codes ^ EXPECTED_CHAR_CODES}"
         )
 
-        # Check glyph data (all characters except fullwidth space should have non-empty outlines)
-        glyf_table = font.get("glyf")
-        if glyf_table:
+        glyf = font.get("glyf")
+        if glyf:
             for code in EXPECTED_CHAR_CODES:
-                ch = chr(code)
-                glyph_name = cmap[code]
-                glyph = glyf_table[glyph_name]
-                if ch == "　":
-                    assert glyph.numberOfContours == 0, (
+                contours = glyf[cmap[code]].numberOfContours
+                if chr(code) == "　":
+                    assert contours == 0, (
                         f"[{prefix}] Fullwidth space should have 0 contours"
                     )
                 else:
-                    assert glyph.numberOfContours != 0, (
-                        f"[{prefix}] Character '{ch}' has empty glyph"
+                    assert contours != 0, (
+                        f"[{prefix}] Character {chr(code)!r} has empty glyph"
                     )
 
     print(
@@ -243,92 +200,40 @@ def test_character_coverage_and_glyphs():
     )
 
 
-def test_metadata_validity():
-    """Verify that all metadata fields are complete, correct, and free of leftover Zen branding."""
+def test_metadata_validity() -> None:
+    """Verify metadata fields across all fonts."""
     print("\n--- Test 3: Metadata & OpenType Tables ---")
-    for prefix in EXPECTED_FAMILIES:
-        ttf_path = FONTS_DIR / f"{prefix}.ttf"
-        font = TTFont(ttf_path)
+    for prefix, _, _ in FONTS_INFO:
+        font = TTFont(FONTS_DIR / f"{prefix}.ttf")
 
-        # 1. head table
-        head = font["head"]
-        assert head.fontRevision == 1.0, (
-            f"[{prefix}] head.fontRevision is {head.fontRevision}, expected 1.0"
-        )
-        assert head.modified > 0, f"[{prefix}] head.modified timestamp is invalid"
+        assert font["head"].fontRevision == 1.0
+        assert font["head"].modified > 0
+        assert font["OS/2"].achVendID in ("MKMI", b"MKMI")
 
-        # 2. OS/2 table
-        os2 = font["OS/2"]
-        assert os2.achVendID in ("MKMI", b"MKMI"), (
-            f"[{prefix}] OS/2.achVendID is {os2.achVendID}, expected 'MKMI'"
-        )
+        gpos_features = {
+            r.FeatureTag for r in font["GPOS"].table.FeatureList.FeatureRecord
+        }
+        assert {"chws", "vchw", "halt", "vhal"}.issubset(gpos_features)
 
-        # 3. GPOS features
-        gpos = font["GPOS"].table
-        gpos_features = {r.FeatureTag for r in gpos.FeatureList.FeatureRecord}
-        required_gpos = {"chws", "vchw", "halt", "vhal"}
-        assert required_gpos.issubset(gpos_features), (
-            f"[{prefix}] Missing GPOS features: {required_gpos - gpos_features}"
-        )
+        gsub_features = {
+            r.FeatureTag for r in font["GSUB"].table.FeatureList.FeatureRecord
+        }
+        assert {"vert", "vrt2"}.issubset(gsub_features)
 
-        # 4. GSUB features
-        gsub = font["GSUB"].table
-        gsub_features = {r.FeatureTag for r in gsub.FeatureList.FeatureRecord}
-        required_gsub = {"vert", "vrt2"}
-        assert required_gsub.issubset(gsub_features), (
-            f"[{prefix}] Missing GSUB features: {required_gsub - gsub_features}"
-        )
-
-        # 5. name table
         names = {
             r.nameID: r.toUnicode()
             for r in font["name"].names
             if r.platformID == 3 and r.langID == 1033
         }
-
-        # Copyright
-        assert "Copyright 2026 Daiji256." in names[0], (
-            f"[{prefix}] Copyright missing Daiji256"
-        )
-        assert "The Zen" in names[0], (
-            f"[{prefix}] Copyright should preserve original Zen authors credit"
-        )
-
-        # Family & Full Name
-        assert names[1].startswith("Makumi"), (
-            f"[{prefix}] Family name does not start with Makumi: {names[1]}"
-        )
-        assert "Zen" not in names[1], (
-            f"[{prefix}] Family name still contains Zen: {names[1]}"
-        )
-        assert names[4].startswith("Makumi"), (
-            f"[{prefix}] Full name does not start with Makumi: {names[4]}"
-        )
-        assert "Zen" not in names[4], (
-            f"[{prefix}] Full name still contains Zen: {names[4]}"
-        )
-
-        # Version & PostScript
-        assert names[5] == "Version 1.000", (
-            f"[{prefix}] Version string is {names[5]}, expected Version 1.000"
-        )
-        assert names[6].startswith("Makumi"), (
-            f"[{prefix}] PostScript name does not start with Makumi: {names[6]}"
-        )
-        assert " " not in names[6], (
-            f"[{prefix}] PostScript name contains spaces: {names[6]}"
-        )
-
-        # Vendor & Designer credits
-        assert names[8] == "Positype", f"[{prefix}] Manufacturer should be Positype"
-        assert names[9] == "Yoshimichi Ohira", (
-            f"[{prefix}] Designer should be Yoshimichi Ohira"
-        )
+        assert "Copyright 2026 Daiji256." in names[0] and "The Zen" in names[0]
+        assert names[1].startswith("Makumi") and "Zen" not in names[1]
+        assert names[4].startswith("Makumi") and "Zen" not in names[4]
+        assert names[5] == "Version 1.000"
+        assert names[6].startswith("Makumi") and " " not in names[6]
+        assert names[8] == "Positype"
+        assert names[9] == "Yoshimichi Ohira"
         assert names[11] == "https://positype.com"
         assert names[12] == "https://www.zenfont.jp"
-
-        # Description (NameID 10)
-        assert 10 in names, f"[{prefix}] Missing Description (NameID 10)"
         assert (
             "subset web font for Japanese punctuation marks based on Zen" in names[10]
         )
@@ -340,21 +245,10 @@ def test_metadata_validity():
 
 def segment_text(text: str) -> list[tuple[str, bool]]:
     """Segment a string into alternating chunks of punctuation (Makumi) and general chars (Zen)."""
-    if not text:
-        return []
-    segments: list[tuple[str, bool]] = []
-    curr_is_y = text[0] in YAKUMONO_SET
-    curr_chars = [text[0]]
-    for ch in text[1:]:
-        is_y = ch in YAKUMONO_SET
-        if is_y == curr_is_y:
-            curr_chars.append(ch)
-        else:
-            segments.append(("".join(curr_chars), curr_is_y))
-            curr_chars = [ch]
-            curr_is_y = is_y
-    segments.append(("".join(curr_chars), curr_is_y))
-    return segments
+    return [
+        ("".join(group), is_y)
+        for is_y, group in itertools.groupby(text, lambda c: c in YAKUMONO_SET)
+    ]
 
 
 def draw_text_run(
@@ -369,31 +263,24 @@ def draw_text_run(
     """Draw a text string with fallback: Makumi for punctuation, Zen for general characters."""
     x, y = pos
     features = ["chws"] if enable_chws else ["-chws"]
-    segments = segment_text(text)
-    for seg, is_y in segments:
+    for seg, is_y in segment_text(text):
         f = makumi_font if is_y else zen_font
         draw.text((x, y), seg, font=f, fill=fill, features=features)
         x += f.getlength(seg, features=features)
     return x - pos[0]
 
 
-def test_chws_feature_compaction():
+def test_chws_feature_compaction() -> None:
     """Verify that chws feature reduces advance width across all 23 fonts and weights."""
     print("\n--- Test 4: chws Feature Compaction Across All 23 Fonts & Weights ---")
-    for makumi_prefix, zen_filename, display_name in FONTS_INFO:
-        makumi_path = FONTS_DIR / f"{makumi_prefix}.ttf"
-        zen_path = SOURCES_DIR / zen_filename
-
+    dummy_draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    for prefix, zen_file, _ in FONTS_INFO:
         m_font = ImageFont.truetype(
-            str(makumi_path), 32, layout_engine=ImageFont.Layout.RAQM
+            str(FONTS_DIR / f"{prefix}.ttf"), 32, layout_engine=ImageFont.Layout.RAQM
         )
         z_font = ImageFont.truetype(
-            str(zen_path), 32, layout_engine=ImageFont.Layout.RAQM
+            str(SOURCES_DIR / zen_file), 32, layout_engine=ImageFont.Layout.RAQM
         )
-
-        # Measure text advance width with chws OFF and ON
-        dummy_img = Image.new("RGB", (1, 1))
-        dummy_draw = ImageDraw.Draw(dummy_img)
 
         w_off = draw_text_run(
             dummy_draw, (0, 0), SAMPLE_LINE1, m_font, z_font, False, (0, 0, 0)
@@ -404,13 +291,11 @@ def test_chws_feature_compaction():
 
         reduction_px = w_off - w_on
         reduction_pct = (reduction_px / w_off) * 100
-
-        # Assert that chws properly compacts punctuation spacing
         assert reduction_px >= 40.0, (
-            f"[{makumi_prefix}] Insufficient compaction: reduction={reduction_px:.1f}px (w_off={w_off:.1f}, w_on={w_on:.1f})"
+            f"[{prefix}] Insufficient compaction: reduction={reduction_px:.1f}px"
         )
         print(
-            f"  [{makumi_prefix:35}] -{reduction_px:.1f}px (-{reduction_pct:.1f}%) | OFF: {w_off:.1f}px -> ON: {w_on:.1f}px"
+            f"  [{prefix:35}] -{reduction_px:.1f}px (-{reduction_pct:.1f}%) | OFF: {w_off:.1f}px -> ON: {w_on:.1f}px"
         )
 
     print(
@@ -423,151 +308,121 @@ def generate_specimen_card(
     zen_filename: str,
     display_name: str,
 ) -> Image.Image:
-    """Generate a clean, compact visual specimen card with minimal styling."""
+    """Generate a clean visual specimen card (720x280) comparing chws OFF vs ON."""
     makumi_path = FONTS_DIR / f"{makumi_prefix}.ttf"
     zen_path = SOURCES_DIR / zen_filename
 
-    body_size = 24
-    title_size = 18
-    label_size = 13
-
-    f_m_body = ImageFont.truetype(
-        str(makumi_path), body_size, layout_engine=ImageFont.Layout.RAQM
-    )
-    f_z_body = ImageFont.truetype(
-        str(zen_path), body_size, layout_engine=ImageFont.Layout.RAQM
-    )
-    f_z_title = ImageFont.truetype(
-        str(zen_path), title_size, layout_engine=ImageFont.Layout.RAQM
-    )
-    f_z_label = ImageFont.truetype(
-        str(zen_path), label_size, layout_engine=ImageFont.Layout.RAQM
-    )
+    raqm = ImageFont.Layout.RAQM
+    f_m_body = ImageFont.truetype(str(makumi_path), 24, layout_engine=raqm)
+    f_z_body = ImageFont.truetype(str(zen_path), 24, layout_engine=raqm)
+    f_z_title = ImageFont.truetype(str(zen_path), 18, layout_engine=raqm)
+    f_z_label = ImageFont.truetype(str(zen_path), 13, layout_engine=raqm)
 
     w, h = 720, 280
     img = Image.new("RGB", (w, h), (255, 255, 255))
     draw = ImageDraw.Draw(img)
 
-    c_text = (17, 24, 39)  # #111827 Dark neutral text
-    c_label = (107, 114, 128)  # #6B7280 Muted gray label
-    c_line = (229, 231, 235)  # #E5E7EB Subtle divider line
+    c_text = (17, 24, 39)
+    c_label = (107, 114, 128)
+    c_line = (229, 231, 235)
     pad_x = 32
 
-    # Title: font family name
-    y = 20
-    draw.text((pad_x, y), display_name, font=f_z_title, fill=c_text)
-
-    # Title bottom divider line
+    draw.text((pad_x, 20), display_name, font=f_z_title, fill=c_text)
     draw.line([(pad_x, 48), (w - pad_x, 48)], fill=c_line, width=1)
 
-    # Section 1: chws OFF
-    draw.text((pad_x, 64), "chws OFF", font=f_z_label, fill=c_label)
-    draw_text_run(draw, (pad_x, 86), SAMPLE_LINE1, f_m_body, f_z_body, False, c_text)
-    draw_text_run(draw, (pad_x, 118), SAMPLE_LINE2, f_m_body, f_z_body, False, c_text)
+    for label, enable_chws, label_y in [
+        ("chws OFF", False, 64),
+        ("chws ON", True, 172),
+    ]:
+        draw.text((pad_x, label_y), label, font=f_z_label, fill=c_label)
+        draw_text_run(
+            draw,
+            (pad_x, label_y + 22),
+            SAMPLE_LINE1,
+            f_m_body,
+            f_z_body,
+            enable_chws,
+            c_text,
+        )
+        draw_text_run(
+            draw,
+            (pad_x, label_y + 54),
+            SAMPLE_LINE2,
+            f_m_body,
+            f_z_body,
+            enable_chws,
+            c_text,
+        )
 
-    # Mid section divider line
     draw.line([(pad_x, 156), (w - pad_x, 156)], fill=c_line, width=1)
-
-    # Section 2: chws ON
-    draw.text((pad_x, 172), "chws ON", font=f_z_label, fill=c_label)
-    draw_text_run(draw, (pad_x, 194), SAMPLE_LINE1, f_m_body, f_z_body, True, c_text)
-    draw_text_run(draw, (pad_x, 226), SAMPLE_LINE2, f_m_body, f_z_body, True, c_text)
-
     return img
 
 
-def test_visual_specimens_and_regression():
-    """Generate visual specimens in specimens/ and run visual regression testing.
+def _save_diff_report(
+    old_img: Image.Image,
+    new_img: Image.Image,
+    diff: Image.Image,
+    dest: Path,
+    title: str,
+) -> None:
+    """Save Before / After / Diff visual regression report image."""
+    w, h = new_img.size
+    diff_mask = diff.convert("L").point(lambda p: 255 if p > 10 else 0, mode="1")
+    diff_colored = Image.new("RGB", (w, h), (255, 255, 255))
+    diff_colored.paste(Image.new("RGB", (w, h), (220, 20, 60)), mask=diff_mask)
 
-    If a specimen file exists and has identical pixels, it is NOT overwritten (preserving binary reproducibility).
-    If a visual diff is detected, the specimen is updated and a Before/After/Diff comparison is saved
-    to tmp/specimens_diff/ for inspection.
-    """
+    rep_img = Image.new("RGB", (w, h * 3 + 80), (245, 245, 248))
+    draw = ImageDraw.Draw(rep_img)
+    draw.text((24, 8), f"Visual Regression Report — {title}", fill=(180, 0, 0))
+    draw.text((24, 28), "[1] Existing Version (Before)", fill=(100, 100, 100))
+    rep_img.paste(old_img, (0, 48))
+    draw.text((24, h + 58), "[2] Newly Built Version (After)", fill=(0, 120, 0))
+    rep_img.paste(new_img, (0, h + 78))
+    draw.text(
+        (24, h * 2 + 88),
+        "[3] Pixel Difference Highlight (Changed Pixels)",
+        fill=(220, 20, 60),
+    )
+    rep_img.paste(diff_colored, (0, h * 2 + 108))
+    rep_img.save(dest)
+
+
+def test_visual_specimens_and_regression() -> None:
+    """Generate visual specimens in specimens/ and run visual regression testing."""
     print("\n--- Test 5: Visual Specimens (specimens/) & Regression Testing ---")
     SPECIMENS_DIR.mkdir(parents=True, exist_ok=True)
     SPECIMENS_DIFF_DIR.mkdir(parents=True, exist_ok=True)
 
-    matches_count = 0
-    created_count = 0
-    updated_count = 0
-
-    for makumi_prefix, zen_filename, display_name in FONTS_INFO:
-        specimen_file = SPECIMENS_DIR / f"{makumi_prefix}.png"
-        new_img = generate_specimen_card(makumi_prefix, zen_filename, display_name)
+    matches = created = updated = 0
+    for prefix, zen_file, display_name in FONTS_INFO:
+        specimen_file = SPECIMENS_DIR / f"{prefix}.png"
+        new_img = generate_specimen_card(prefix, zen_file, display_name)
 
         if not specimen_file.exists():
-            # First-time creation
             new_img.save(specimen_file)
-            created_count += 1
+            created += 1
             print(f"  [CREATED]  {specimen_file.name}")
+            continue
+
+        old_img = Image.open(specimen_file).convert("RGB")
+        diff = ImageChops.difference(old_img, new_img)
+        if diff.getbbox() is None:
+            matches += 1
+            print(f"  [MATCH]    {specimen_file.name}")
         else:
-            # Visual regression comparison against existing specimen
-            old_img = Image.open(specimen_file).convert("RGB")
-            diff = ImageChops.difference(old_img, new_img)
-            diff_bbox = diff.getbbox()
-
-            if diff_bbox is None:
-                # 100% pixel identical: DO NOT overwrite (preserves exact binary and timestamp)
-                matches_count += 1
-                print(
-                    f"  [MATCH]    {specimen_file.name} (100% pixel match, no binary diff)"
-                )
-            else:
-                # Visual difference detected: Update specimen and output regression diff
-                updated_count += 1
-                diff_colored = Image.new("RGB", new_img.size, (255, 255, 255))
-                w, h = new_img.size
-                for y in range(h):
-                    for x in range(w):
-                        r, g, b = diff.getpixel((x, y))
-                        if r > 10 or g > 10 or b > 10:
-                            diff_colored.putpixel((x, y), (220, 20, 60))
-
-                # Composite 3-tier regression report (Before, After, Diff Highlight)
-                rep_h = h * 3 + 80
-                rep_img = Image.new("RGB", (w, rep_h), (245, 245, 248))
-                rep_draw = ImageDraw.Draw(rep_img)
-
-                rep_draw.text(
-                    (24, 8),
-                    f"Visual Regression Report — {display_name}",
-                    fill=(180, 0, 0),
-                )
-                rep_draw.text(
-                    (24, 28), "[1] Existing Version (Before)", fill=(100, 100, 100)
-                )
-                rep_img.paste(old_img, (0, 48))
-
-                rep_draw.text(
-                    (24, h + 58), "[2] Newly Built Version (After)", fill=(0, 120, 0)
-                )
-                rep_img.paste(new_img, (0, h + 78))
-
-                rep_draw.text(
-                    (24, h * 2 + 88),
-                    "[3] Pixel Difference Highlight (Crimson Red = Changed Pixels)",
-                    fill=(220, 20, 60),
-                )
-                rep_img.paste(diff_colored, (0, h * 2 + 108))
-
-                diff_report_file = SPECIMENS_DIFF_DIR / f"{makumi_prefix}_diff.png"
-                rep_img.save(diff_report_file)
-
-                # Overwrite specimen file so Git notices the update
-                new_img.save(specimen_file)
-                print(
-                    f"  [UPDATED]  {specimen_file.name} (Visual diff detected! Saved diff report to tmp/specimens_diff/{diff_report_file.name})"
-                )
+            updated += 1
+            diff_file = SPECIMENS_DIFF_DIR / f"{prefix}_diff.png"
+            _save_diff_report(old_img, new_img, diff, diff_file, display_name)
+            new_img.save(specimen_file)
+            print(f"  [UPDATED]  {specimen_file.name} (diff saved to {diff_file})")
 
     print(
-        f"\n  Visual Specimen Summary: {created_count} created, {matches_count} matched (untouched), {updated_count} updated."
+        f"\n  Visual Specimen Summary: {created} created, {matches} matched, {updated} updated."
     )
 
 
-def main():
-    print("==================================================")
-    print("      MAKUMI FONTS COMPREHENSIVE TEST SUITE       ")
-    print("==================================================")
+def main() -> None:
+    print("=== Makumi Fonts Test Suite ===")
     test_file_completeness_and_sizes()
     test_character_coverage_and_glyphs()
     test_metadata_validity()
